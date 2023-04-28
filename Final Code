@@ -1,0 +1,297 @@
+library(jpeg)
+library(reticulate)
+library(jpeg)
+library(tidyverse)
+library(keras)
+library(tensorflow)
+install_tensorflow(extra_packages="pillow")
+library(imager)
+library(magick)
+library(cluster)
+
+#SET WORKING DIRECTORY!!!!!!!
+setwd()
+
+model<-load_model_tf("./dandelion_model")
+
+main_algorithm <- function(image_name){
+  #algorithm1
+  algorithm1 <- function(x,P){
+    x_size <- length(x[,1,1]) #get width of image
+    y_size <- length(x[1,,1]) #get height of image
+    
+    percent <- P #percent of pixels
+    max_pixels <- x_size * y_size * percent #max pixels that can be used
+    
+    if(max_pixels > 0 ){
+      x_coords = c(floor(runif(max_pixels, min = 0, max = x_size))) #find random x coordinats
+      y_coords = c(floor(runif(max_pixels, min = 0, max = y_size))) #find random y coordinates
+      
+      for(i in 1:max_pixels)
+        xindex = x_coords[i] #get the x coordinate to change
+      yindex = y_coords[i] #get the y coordinate to change
+      
+      x[xindex,yindex,1] <- 1 #modifies red value
+      x[xindex,yindex,2] <- 1 #modifies green value
+      x[xindex,yindex,3] <- 0 #modifies blue value
+      
+    }
+    writeJPEG(x, "./algorithm1modulated.jpg") #write image to jpeg file
+  }
+  
+#algorithm2
+algorithm2 <- function(x,P){
+  x_size <- length(x[,1,1]) #get width of image
+  y_size <- length(x[1,,1]) #get height of image
+  
+  percent <- P #percent of pixels to change
+  max_pixels <- x_size * y_size * percent #calculate max pixels
+  
+  if(max_pixels > 0 ){
+    x_coords = c(floor(runif(max_pixels, min = 0, max = x_size))) #randomly sample x coorindate
+    y_coords = c(floor(runif(max_pixels, min = 0, max = y_size))) #randomly sample y coordinate
+    newx = x * 0 #clone original image array and fill with zeros
+    for(i in 1:max_pixels){
+      red = round(runif(1,min = 0,max = 1),1) #find random R color
+      green = round(runif(1,min = 0,max = 1),1) #find random green color
+      blue = round(runif(1,min = 0,max = 1),1) #find random blue color
+      
+      xindex = x_coords[i] #get x index to change
+      yindex = y_coords[i] #get y index to change
+      
+      newx[xindex,yindex,1] <- red #modifies red value
+      newx[xindex,yindex,2] <- green #modifies green value
+      newx[xindex,yindex,3] <- blue #modifies blue value
+    }
+    noisyx <- x + newx #add noise to image
+  }
+  writeJPEG(noisyx, "./algorithm2modulated.jpg")
+}
+#algorithm3
+algorithm3 <- function (x, P) {
+  horz_ax <- length(x[,1,1])
+  vert_ax <- length(x[1,,1])
+  for (i in 1:horz_ax) {
+    for (j in 1:vert_ax) {
+      if ((((j-1) * horz_ax) + i) %% P == 0) { 
+        x[i,j,1] <- 0 #red
+        x[i,j,2] <- 0 #green
+        x[i,j,3] <- 1 #blue
+      }
+    }
+  }
+  # updated image with array
+  # save "./grass/modified_grass.jpg" as image
+  writeJPEG(x, "./algorithm3modulated.jpg")
+  
+}
+
+#algorithm 4
+algorithm4 <- function(image_array, num_clusters = 5, num_pixels_to_modify) {
+  num_rows <- dim(image_array)[1]
+  num_cols <- dim(image_array)[2]
+  num_pixels_to_modify <- num_rows * num_cols * num_pixels_to_modify
+  pixel_matrix <- array_reshape(image_array, c(num_rows * num_cols, 3))
+  
+  # Apply k-means clustering
+  kmeans_result <- kmeans(pixel_matrix, centers = num_clusters)
+  
+  # Modify the centroids
+  modified_centroids <- kmeans_result$centers
+  modified_centroids[, 1] <- 1
+  modified_centroids[, 2] <- 1
+  modified_centroids[, 3] <- 0
+  
+  # Construct a modified pixel matrix with the modified centroids
+  modified_pixel_matrix <- modified_centroids[kmeans_result$cluster, ]
+  
+  # Select the number of pixels to modify
+  sample_indices <- sample(1:(num_rows * num_cols), size = num_pixels_to_modify)
+  modified_pixel_matrix[sample_indices,] <- pixel_matrix[sample_indices,]
+  
+  # Reshape the modified pixel matrix back to the original image array shape
+  modified_image_array <- array_reshape(modified_pixel_matrix, dim(image_array))
+  
+  writeJPEG(modified_image_array, "./algorithm4modulated.jpg")
+}
+
+#algorithm5
+algorithm5 = function(x_path, P){
+  img <- load.image(x_path)
+  width <- as.numeric(dim(img)[1])
+  height <- as.numeric(dim(img)[2])
+  middle = width / 3
+  
+  img_grad = imgradient(img, "x")
+  max_grad = where(img_grad == max(img_grad))$x[1]
+  
+  img_grad2 = imgradient(img, "y")
+  max_grad2 = where(img_grad == max(img_grad))$y[1]
+  
+  pixels = width * height
+  total_pixels = P * pixels # using 0.1 for now cause idk what it should be
+  
+  if(total_pixels > (height * 2)){
+    bars = (total_pixels / height) / 2
+    middlex = width / 2
+    middley = height / 2
+  
+    img_blurry <- isoblur(img,10)
+  
+    blur1 = imsub(img_blurry, x >= max_grad, x< bars)
+    blur2 = imsub(img_blurry, y >= max_grad2, y< bars, x>= middlex - middley, x < middley)
+  
+    blur1_mag = cimg2magick(blur1)
+    blur2_mag = cimg2magick(blur2)
+    img_mag = cimg2magick(img)
+  
+    blur1_mag2 = image_negate(image_convolve(blur1_mag, 'Sobel')) 
+    blur2_mag2 = image_negate(image_convolve(blur2_mag, 'Sobel')) 
+  
+    blur1_rotate = image_rotate(image_background(blur1_mag2, "none"), 0)
+    blur2_rotate = image_rotate(image_background(blur2_mag2, "none"), 0)
+  
+    blur1_offset = paste("+", middlex,"+0")
+    blur2_offset = paste("+", middlex/2, "+", middley)
+  
+    new_img = image_composite(img_mag, blur1_rotate, offset = blur1_offset)
+    new_img2 = image_composite(new_img, blur2_rotate, offset = blur2_offset)
+  
+    final_img = magick2cimg(new_img2)
+    
+    save.image(final_img, "./algorithm5modulated.jpg")
+  }
+  if(total_pixels <= (height * 2)){
+    save.image(img, "./algorithm5modulated.jpg")
+  }
+  
+}
+
+#results of algorithm predictions
+original_prediction = c()
+a1results = c()
+a2results = c()
+a3results = c()
+a4results = c()
+a5results = c()
+
+
+res=c("","")
+f=list.files("./dandelions")
+for (i in f){
+  test_image <- image_load(paste("./dandelions/",i,sep=""))
+  file_path <- paste("./dandelions/",i,sep="")
+
+  test_imagex <- image_load(paste("./dandelions/",i,sep=""), target_size = c(224,224))
+  test_imagex <- image_to_array(test_imagex)
+  test_imagex <- test_imagex/255
+  
+  x<-image_to_array(test_image)
+  x<- x/255
+  
+  P = .01
+  algorithm3percent = 100-(100*P)
+  
+  #run algorithms and produce images that are saved in the same directory
+  algorithm1(x,P)
+  algorithm2(x,P)
+  algorithm3(x,algorithm3percent)
+  algorithm4(x,5,P)
+  algorithm5(file_path,P)
+  
+  
+  #load in adversarial images 
+  al1 <- image_load("./algorithm1modulated.jpg",target_size=c(224,224))
+  al2 <- image_load("./algorithm2modulated.jpg",target_size=c(224,224))
+  al3 <- image_load("./algorithm3modulated.jpg",target_size=c(224,224))
+  al4 <- image_load("./algorithm4modulated.jpg",target_size=c(224,224))
+  al5 <- image_load("./algorithm5modulated.jpg",target_size=c(224,224))
+  
+  al1new <- image_to_array(al1)
+  al1new <- array_reshape(al1new, c(1, dim(al1new)))
+  al1new <- al1new/255
+  
+  al2new <- image_to_array(al2)
+  al2new <- array_reshape(al2new, c(1, dim(al2new)))
+  al2new <- al2new/255
+  
+  al3new <- image_to_array(al3)
+  al3new <- array_reshape(al3new, c(1, dim(al3new)))
+  al3new <- al3new/255
+  
+  al4new <- image_to_array(al4)
+  al4new <- array_reshape(al4new, c(1, dim(al4new)))
+  al4new <- al4new/255
+  
+  al5new <- image_to_array(al5)
+  al5new <- array_reshape(al5new, c(1, dim(al5new)))
+  al5new <- al5new/255
+  
+  x <- array_reshape(x, c(1, dim(x)))
+  
+  original_prediction <- c(original_prediction,1)
+  a1results <- c(a1results,which.max( model %>% predict(al1new)))
+  a2results <- c(a2results,which.max( model %>% predict(al2new)))
+  a3results <- c(a3results,which.max( model %>% predict(al3new)))
+  a4results <- c(a4results,which.max( model %>% predict(al4new)))
+  a5results <- c(a5results,which.max( model %>% predict(al5new)))
+}
+
+results = data.frame(original = original_prediction, a1 = a1results,a2 = a2results, a3 = a3results, a4 = a4results, a5 = a5results)
+
+
+accuracy1 = sum(ifelse(results$original==results$a1,0,1))/length(results$a1)
+accuracy2 = sum(ifelse(results$original==results$a2,0,1))/length(results$a2)
+accuracy3 = sum(ifelse(results$original==results$a3,0,1))/length(results$a3)
+accuracy4 = sum(ifelse(results$original==results$a4,0,1))/length(results$a1)
+accuracy5 = sum(ifelse(results$original==results$a5,0,1))/length(results$a5)
+
+#weighted
+#total_accuracy = sum(accuracy1,accuracy2,accuracy3,accuracy4,accuracy5)
+total_accuracy = sum(accuracy1,accuracy2,accuracy3,accuracy4, accuracy5)
+weight1 = accuracy1/total_accuracy
+weight2 = accuracy2/total_accuracy
+weight3 = accuracy3/total_accuracy
+weight4 = accuracy4/total_accuracy
+weight5 = accuracy5/total_accuracy
+
+
+original_image <- image_load(image_name)
+original_image <- image_to_array(original_image)
+original_image <- original_image/255
+
+algorithm1(original_image,weight1*.01)
+
+al2input <- image_load("./algorithm1modulated.jpg")
+al2input <- image_to_array(al2input)
+al2input <- al2input/255
+
+algorithm2(al2input,weight2*.01)
+
+al3input <- image_load("./algorithm2modulated.jpg")
+al3input <- image_to_array(al3input)
+al3input <- al3input/255
+algorithm3percent = 100-(100*(weight3*.01))
+
+algorithm3(al3input,algorithm3percent)
+
+al4input <- image_load("./algorithm3modulated.jpg")
+al4input <- image_to_array(al4input)
+al4input <- al4input/255
+
+algorithm4(al4input,5,weight4)
+
+
+al5input <- image_load("./algorithm4modulated.jpg")
+al5input <- image_to_array(al5input)
+al5input <- al5input/255
+
+algorithm5("./algorithm4modulated.jpg",weight5*.01)
+
+final <- image_load("./algorithm5modulated.jpg",target_size=c(224,224))
+final <- image_to_array(final)
+final <- final/255
+writeJPEG(final, "./final_image.jpg")
+}
+
+
